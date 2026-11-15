@@ -1,8 +1,8 @@
 """Show the NVIDIA driver setting "CUDA - Sysmem Fallback Policy" (read-only, no admin needed).
 
-  memguard-sysmem        (or: python -m memguard.sysmem)
+  spillsafe-sysmem        (or: python -m spillsafe.sysmem)
 
-Part of memguard, created by 0xydendrum. PolyForm Noncommercial License 1.0.0.
+Part of spillsafe, created by 0xydendrum. PolyForm Noncommercial License 1.0.0.
 
 The policy decides what happens when a CUDA program asks for more VRAM than is free:
   0 / not set  Driver default: fall back to system RAM (driver 536.40+)

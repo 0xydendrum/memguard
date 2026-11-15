@@ -1,78 +1,107 @@
-# memguard
+# spillsafe
 
-**Run heavy local AI jobs one at a time, and only when your PC has the memory for them.**
-A small Windows command-line wrapper for model evals, training runs, benchmarks and big downloads. Instead of crashing
-the machine or getting killed halfway through, a job waits its turn until RAM and VRAM can hold it.
+**Run heavy AI jobs on your own Windows PC without running it out of memory.**
+
+spillsafe is a small command-line tool that you put in front of any heavy command: a model eval, a training run, a
+benchmark, a big download. It holds the job back until your PC really has room for it, runs heavy jobs one at a time in
+the order they arrived, and cleans up completely when each one finishes.
+
+```
+spillsafe --ram 2 --vram 10 -- python eval.py
+```
+
+In plain words: *"This job needs about 2 GiB of RAM and 10 GiB of graphics memory. Start it when there's room."*
 
 > Created by **0xydendrum**. Free for noncommercial use under the PolyForm Noncommercial License 1.0.0.
 
-```
-memguard --ram 2 --vram 10 -- python eval.py
-```
+## The problem it solves
 
-## Why
+Two kinds of memory matter for AI work on a PC:
 
-On Windows, when a CUDA program asks for more VRAM than the card has, the NVIDIA driver does not fail. It quietly moves
-the overflow into system RAM ("CUDA sysmem fallback", on by default since driver 536.40), where it runs about 10x slower.
-So a VRAM shortfall turns into **RAM** pressure, and tools that only watch VRAM miss it. Start two jobs that each fit on
-their own and the PC runs out of RAM: background jobs get killed, or the whole machine stalls.
+- **VRAM**, the fast memory on your graphics card. This is where a model wants to live.
+- **RAM**, the ordinary system memory that everything else shares: Windows, your browser, every other program.
 
-memguard was written after exactly that: four overnight jobs were killed when free RAM dropped to about 5 GiB. The GPU
-was fine. A model server was holding 18 GB of RAM.
+You might expect a program that asks for more VRAM than your card has to stop with an "out of memory" error. On Windows
+with an NVIDIA card, it doesn't. The driver quietly puts the part that doesn't fit into RAM instead (NVIDIA calls this
+"CUDA sysmem fallback", and it has been on by default since driver 536.40). The job keeps running, about 10 times
+slower, and it is now using RAM that no other program knows about.
 
-## What it does
+That's how a PC that looks fine falls over. You start two jobs that would each fit on their own. The second one doesn't
+fit in VRAM, so its overflow spills into RAM. RAM runs out, and Windows starts killing programs or freezes altogether.
+Hours of work are lost. Tools that only watch VRAM never see it coming, because VRAM was never the problem.
 
-- **Budgets RAM and VRAM as one pool.** A job starts only when
-  `free RAM - reserve >= job RAM + max(0, job VRAM - free VRAM)`. Whatever doesn't fit in VRAM is counted against RAM,
-  because that's where the driver will put it.
-- **Runs heavy jobs one at a time, first come first served.** A machine-wide queue built on Windows file locks works
-  across terminals, SSH sessions and admin windows. If a holder dies, Windows releases the lock automatically.
-- **Leaves no orphans.** The job runs inside a Windows job object, so if memguard is killed (closed terminal, Ctrl+C,
-  Task Manager) the whole process tree dies with it and nothing keeps holding memory after the lock is gone.
-- **Reports what happened.** Runtime, exit code, peak committed memory and the lowest free RAM seen. It warns if free
-  RAM drops below half the reserve, and it keeps the PC from sleeping while a job runs.
+spillsafe was built after exactly that happened: four overnight jobs were killed when free RAM dropped to about 5 GiB.
+The graphics card had room to spare. A model server was holding 18 GB of RAM.
+
+## How it works
+
+1. **You say roughly what the job needs**, with `--ram` and `--vram` in GiB. Rough guesses are fine: spillsafe reports
+   the real peak afterwards so you can tune them.
+2. **The job waits in line.** Heavy jobs run one at a time, first come first served. There is one line for the whole
+   PC, so jobs started from different terminals, SSH sessions or scripts all wait in the same queue. If a job crashes,
+   its place is released automatically.
+3. **It waits for memory.** When it's the job's turn, spillsafe works out what the job will really cost: its RAM, plus
+   whatever part of its VRAM won't fit on the card, because that part is going to land in RAM. The job starts only when
+   that total fits and still leaves a safety margin free (6 GiB by default) so the desktop stays responsive. Until then
+   it checks every 10 seconds and tells you what it's waiting for. A job that could never fit on this PC is refused
+   straight away instead of waiting forever.
+
+   The rule, exactly: `free RAM - reserve >= job RAM + max(0, job VRAM - free VRAM)`.
+4. **It runs the job and cleans up after it.** The job, and every process it starts, runs inside a Windows *job
+   object*: a container that Windows closes as a whole. Close the terminal, press Ctrl+C or end spillsafe in Task
+   Manager, and everything the job started goes with it. Nothing is left behind holding memory.
+5. **It tells you what happened**: how long the job ran, how it exited, its peak memory use and the lowest free RAM seen
+   along the way. It also stops the PC from going to sleep in the middle of a job.
+
+## Who it's for
+
+Anyone running AI locally on a single Windows PC: people using llama.cpp, Ollama, ComfyUI, fine-tuning scripts or eval
+suites, and AI coding agents that start heavy jobs on their own. These tools share one machine without knowing about
+each other. spillsafe makes them take turns.
+
+It works best with an NVIDIA card, but doesn't need one: without a GPU it still budgets RAM and runs the queue.
 
 ## Install
 
-Requires Windows and Python 3.9+. No dependencies. NVIDIA GPUs are read through `nvidia-smi`; without one, memguard
+Requires Windows and Python 3.9+. No dependencies. NVIDIA GPUs are read through `nvidia-smi`; without one, spillsafe
 still budgets RAM.
 
 ```
-pipx install git+https://github.com/0xydendrum/memguard
+pipx install git+https://github.com/0xydendrum/spillsafe
 ```
 
-Or from a clone: `pip install .`, or run it without installing as `python -m memguard`.
+Or from a clone: `pip install .`, or run it without installing as `python -m spillsafe`.
 
 ## Usage
 
 ```
-memguard [--ram GiB] [--vram GiB] [--reserve GiB] [--lock NAME | --no-lock] [--max-wait MIN]
+spillsafe [--ram GiB] [--vram GiB] [--reserve GiB] [--lock NAME | --no-lock] [--max-wait MIN]
          [--no-spill] [--no-kill-tree] -- command args...
-memguard --check [--ram GiB] [--vram GiB] [--max-wait MIN]    # exit 0 if it fits now; takes no lock
-memguard --status                                             # memory, lock holder, queue
-memguard-sysmem                                               # shows the driver's sysmem fallback setting
+spillsafe --check [--ram GiB] [--vram GiB] [--max-wait MIN]    # exit 0 if it fits now; takes no lock
+spillsafe --status                                             # memory, lock holder, queue
+spillsafe-sysmem                                               # shows the driver's sysmem fallback setting
 ```
 
 `--ram` and `--vram` are what the job will **add** on top of current use. Rough numbers are fine; err high.
 
 | Example | What happens |
 |---|---|
-| `memguard --ram 2 --vram 10 -- python bench.py` | waits for the queue and for memory, then runs |
-| `memguard --no-lock --ram 1 -- curl -O https://...` | waits for memory only, doesn't block other jobs |
-| `memguard --max-wait 30 --vram 18 -- python train.py` | gives up with exit code 3 after 30 minutes |
-| `memguard --no-spill --vram 10 -- ...` | requires the VRAM to really be free (no spilling) |
+| `spillsafe --ram 2 --vram 10 -- python bench.py` | waits for the queue and for memory, then runs |
+| `spillsafe --no-lock --ram 1 -- curl -O https://...` | waits for memory only, doesn't block other jobs |
+| `spillsafe --max-wait 30 --vram 18 -- python train.py` | gives up with exit code 3 after 30 minutes |
+| `spillsafe --no-spill --vram 10 -- ...` | requires the VRAM to really be free (no spilling) |
 
 **Exit codes:** the job's own; `3` if memory never fitted within `--max-wait` or the job can never fit on this PC;
 `2` for usage errors. `130` on Ctrl+C.
 
-**Long-running servers** (llama-server, Ollama) should not run *under* memguard: when memguard exits, the job object
-stops everything in it. Use `memguard --check --vram 14 && llama-server ...` instead.
+**Long-running servers** (llama-server, Ollama) should not run *under* spillsafe: when spillsafe exits, the job object
+stops everything in it. Use `spillsafe --check --vram 14 && llama-server ...` instead.
 
-**Nested calls** are safe: a job that already holds the lock can call memguard again and runs straight through.
+**Nested calls** are safe: a job that already holds the lock can call spillsafe again and runs straight through.
 
 ### Worked example
 
-`memguard --ram 2 --vram 10 -- python bench.py` with 7 GiB of VRAM free: 3 GiB will spill into RAM, so the job really
+`spillsafe --ram 2 --vram 10 -- python bench.py` with 7 GiB of VRAM free: 3 GiB will spill into RAM, so the job really
 needs 2 + 3 = 5 GiB of RAM.
 
 - 20 GiB of RAM free: room is 20 - 6 (reserve) = 14, which covers 5, so it starts and warns that the GPU part runs slower.
@@ -86,7 +115,7 @@ needs 2 + 3 = 5 GiB of RAM.
 |---|---|---|
 | `--reserve` | 6 GiB | RAM that must stay free so the desktop and other apps stay responsive |
 | `--lock` | `heavy` | queue name; jobs with different names don't wait for each other |
-| `MEMGUARD_STATE` | `%LOCALAPPDATA%\memguard` | where the lock and queue files live. Every memguard that should share a queue must use the same folder |
+| `SPILLSAFE_STATE` | `%LOCALAPPDATA%\spillsafe` | where the lock and queue files live. Every spillsafe that should share a queue must use the same folder |
 
 
 
@@ -94,15 +123,15 @@ needs 2 + 3 = 5 GiB of RAM.
 
 - Windows only (job objects, file locks, and the driver behaviour it budgets for are Windows-specific).
 - Reads GPU 0 only.
-- Budgets memory, not CPU. A CPU-heavy job started outside memguard can still slow a GPU job down; run it through
-  memguard too, or cap its threads.
-- `--ram`/`--vram` are your estimates. memguard reports the real peak afterwards so you can tune them.
+- Budgets memory, not CPU. A CPU-heavy job started outside spillsafe can still slow a GPU job down; run it through
+  spillsafe too, or cap its threads.
+- `--ram`/`--vram` are your estimates. spillsafe reports the real peak afterwards so you can tune them.
 
 More detail and the gotchas found while building it: [docs/NOTES.md](docs/NOTES.md).
 
 ## Credits
 
-memguard was created by **0xydendrum**.
+spillsafe was created by **0xydendrum**.
 
 ## License
 
@@ -110,6 +139,6 @@ memguard was created by **0xydendrum**.
 
 - **Free** for personal use, hobby projects, research, education, charities and government.
 - **You may modify it and share your reworks** for free, as long as every copy keeps the license and this line:
-  `Required Notice: Copyright (c) 2026 0xydendrum (https://github.com/0xydendrum/memguard)`
-- **No commercial use.** You may not sell memguard or reworks of it, or use it for commercial purposes.
+  `Required Notice: Copyright (c) 2026 0xydendrum (https://github.com/0xydendrum/spillsafe)`
+- **No commercial use.** You may not sell spillsafe or reworks of it, or use it for commercial purposes.
   For commercial licensing, contact 0xydendrum.

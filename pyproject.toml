@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "memguard-win"
+name = "spillsafe"
 dynamic = ["version"]
 description = "Run heavy local AI jobs one at a time, and only when RAM + VRAM can hold them (Windows, NVIDIA-aware)."
 readme = "README.md"
@@ -22,11 +22,11 @@ classifiers = [
 ]
 
 [project.scripts]
-memguard = "memguard.cli:entry"
-memguard-sysmem = "memguard.sysmem:entry"
+spillsafe = "spillsafe.cli:entry"
+spillsafe-sysmem = "spillsafe.sysmem:entry"
 
 [tool.setuptools]
-packages = ["memguard"]
+packages = ["spillsafe"]
 
 [tool.setuptools.dynamic]
-version = { attr = "memguard.__version__" }
+version = { attr = "spillsafe.__version__" }

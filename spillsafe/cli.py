@@ -1,9 +1,9 @@
-"""memguard - run heavy local jobs one at a time, and only when memory can hold them.
+"""spillsafe - run heavy local jobs one at a time, and only when memory can hold them.
 
 Created by 0xydendrum. PolyForm Noncommercial License 1.0.0.
 
 VRAM and system RAM are budgeted as one pool. The NVIDIA driver's CUDA sysmem fallback (on by
-default; check it with `memguard-sysmem`; verified with a 14 GiB-on-12 GiB allocation on an RTX 3060) lets GPU
+default; check it with `spillsafe-sysmem`; verified with a 14 GiB-on-12 GiB allocation on an RTX 3060) lets GPU
 allocations spill into system RAM instead of failing. So a VRAM shortfall becomes extra RAM use
 (at PCIe speed, roughly 10x slower than VRAM) rather than a crash. A job starts only when
 
@@ -13,16 +13,16 @@ The reserve (default 6 GiB) keeps the PC responsive: in the incident that starte
 background jobs were killed when free RAM fell to about 5 GiB.
 
 Heavy jobs also take a machine-wide lock with a first-come-first-served queue, so they never
-overlap. The job runs inside a Windows job object, so if memguard is killed the whole process
+overlap. The job runs inside a Windows job object, so if spillsafe is killed the whole process
 tree dies with it, and no orphan keeps running (and holding memory) after its lock is gone.
 
-  memguard [--ram GiB] [--vram GiB] [--reserve GiB] [--lock NAME | --no-lock] [--max-wait MIN]
+  spillsafe [--ram GiB] [--vram GiB] [--reserve GiB] [--lock NAME | --no-lock] [--max-wait MIN]
            [--no-spill] [--no-kill-tree] -- command args...
-  memguard --check [--ram GiB] [--vram GiB] [--max-wait MIN]   # no lock; exit 0 = fits now
-  memguard --status
+  spillsafe --check [--ram GiB] [--vram GiB] [--max-wait MIN]   # no lock; exit 0 = fits now
+  spillsafe --status
 
 --ram / --vram are what the job itself will add on top of current use. Long-lived servers
-(llama-server) should not run under the lock; start them after `memguard --check` instead.
+(llama-server) should not run under the lock; start them after `spillsafe --check` instead.
 Exit code: the job's own; 3 if memory never fitted within --max-wait; 2 for usage errors.
 """
 import argparse
@@ -36,23 +36,23 @@ import threading
 import time
 from pathlib import Path
 
-from memguard import __author__, __version__  # noqa: F401  (single source for both)
+from spillsafe import __author__, __version__  # noqa: F401  (single source for both)
 
 if sys.platform != "win32":
-    sys.exit("memguard is Windows-only: it uses Windows job objects, file locks and the NVIDIA driver's "
+    sys.exit("spillsafe is Windows-only: it uses Windows job objects, file locks and the NVIDIA driver's "
              "Windows sysmem fallback.")
 import msvcrt  # noqa: E402  (Windows-only modules, imported after the platform check)
 from ctypes import wintypes  # noqa: E402
 
 GIB = 1 << 30
-HELD_ENV = "MEMGUARD_HELD"
+HELD_ENV = "SPILLSAFE_HELD"
 
 
 def state_dir():
-    """Folder for locks, queue tickets and holder files. Every memguard that should share a queue must use
-    the same folder; set MEMGUARD_STATE to choose it (default %LOCALAPPDATA%\\memguard)."""
+    """Folder for locks, queue tickets and holder files. Every spillsafe that should share a queue must use
+    the same folder; set SPILLSAFE_STATE to choose it (default %LOCALAPPDATA%\\spillsafe)."""
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-    return Path(os.environ.get("MEMGUARD_STATE") or os.path.join(base, "memguard"))
+    return Path(os.environ.get("SPILLSAFE_STATE") or os.path.join(base, "spillsafe"))
 
 k32 = ctypes.WinDLL("kernel32", use_last_error=True)
 ntdll = ctypes.WinDLL("ntdll")
@@ -194,7 +194,7 @@ def kill_on_close_job():
 
 def job_leftovers(job):
     """Image names of processes still in the job, ignoring the conhost.exe that Windows attaches to a hidden
-    console (memguard creates one when it has no console itself). None if the list can't be read."""
+    console (spillsafe creates one when it has no console itself). None if the list can't be read."""
     class PIDS(ctypes.Structure):
         _fields_ = [("assigned", wintypes.DWORD), ("listed", wintypes.DWORD), ("ids", ctypes.c_size_t * 512)]
     info = PIDS()
@@ -301,7 +301,7 @@ def clock(t):
 
 
 def say(msg):
-    print(f"memguard: {msg}", file=sys.stderr, flush=True)
+    print(f"spillsafe: {msg}", file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------- commands
@@ -313,7 +313,7 @@ def status(lock_name):
     if free_v is None:
         print("VRAM   unreadable (nvidia-smi failed)")
     else:
-        print(f"VRAM   {free_v:5.1f} / {total_v:.1f} GiB free   (overflow spills into RAM; check: memguard-sysmem)")
+        print(f"VRAM   {free_v:5.1f} / {total_v:.1f} GiB free   (overflow spills into RAM; check: spillsafe-sysmem)")
     lk = Lock(lock_name)
     h = lk.holder_info()
     if lk.is_free():
@@ -418,12 +418,12 @@ def launch(cmd, env, kill_tree, reserve):
     threading.Thread(target=watch, daemon=True).start()
     job = kill_on_close_job() if kill_tree else None
     flags = 0x4 if job else 0  # 0x4 = CREATE_SUSPENDED
-    # An orphaned memguard (its parent shell was killed) has no console, and console programs such as Git Bash then
+    # An orphaned spillsafe (its parent shell was killed) has no console, and console programs such as Git Bash then
     # die at start with 0xC0000142 (DLL init failed). Seen 2026-11-09: a queued job failed when its turn came.
     # Give the child a hidden console of its own in that case.
     # The new hidden console also brings its own std handles, so pass ours on explicitly, or the job's output
     # (e.g. a queue script redirected to a log) goes into that invisible console and every echo fails (seen
-    # 2026-11-09: three overnight gate logs held only memguard's lines, and each job "exited 1" on its last echo).
+    # 2026-11-09: three overnight gate logs held only spillsafe's lines, and each job "exited 1" on its last echo).
     std = {}
     if not k32.GetConsoleWindow():
         flags |= 0x08000000  # CREATE_NO_WINDOW
@@ -485,7 +485,7 @@ def main(argv):
         opts, cmd = argv[:i], argv[i + 1:]
     else:
         opts, cmd = argv, []
-    ap = argparse.ArgumentParser(prog="memguard", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="spillsafe", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ram", type=float, default=0.0, help="GiB of system RAM the job adds (default 0)")
     ap.add_argument("--vram", type=float, default=0.0, help="GiB of VRAM the job adds (default 0)")
     ap.add_argument("--reserve", type=float, default=6.0, help="GiB of RAM that must stay free (default 6)")
@@ -494,10 +494,10 @@ def main(argv):
     ap.add_argument("--max-wait", type=float, default=None,
                     help="minutes to wait for the lock + memory (default: forever; --check: 0)")
     ap.add_argument("--no-spill", action="store_true", help="require the VRAM need to fit in free VRAM")
-    ap.add_argument("--no-kill-tree", action="store_true", help="let the job's processes outlive memguard")
+    ap.add_argument("--no-kill-tree", action="store_true", help="let the job's processes outlive spillsafe")
     ap.add_argument("--check", action="store_true", help="only report whether it fits (waits up to --max-wait)")
     ap.add_argument("--status", action="store_true", help="show memory, the lock holder and the queue")
-    ap.add_argument("--version", action="version", version=f"memguard {__version__} by {__author__}")
+    ap.add_argument("--version", action="version", version=f"spillsafe {__version__} by {__author__}")
     a = ap.parse_args(opts)
     if a.status:
         return status(a.lock)
@@ -509,7 +509,7 @@ def main(argv):
         say("fits: " + describe(p, a.ram, a.vram, a.reserve))
         return 0
     if not cmd:
-        ap.error("give the command after --, e.g.  memguard --ram 4 -- python bench.py")
+        ap.error("give the command after --, e.g.  spillsafe --ram 4 -- python bench.py")
     if a.no_lock:
         a.lock = None
     return run(a, cmd)
