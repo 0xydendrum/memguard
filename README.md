@@ -88,19 +88,7 @@ needs 2 + 3 = 5 GiB of RAM.
 | `--lock` | `heavy` | queue name; jobs with different names don't wait for each other |
 | `MEMGUARD_STATE` | `%LOCALAPPDATA%\memguard` | where the lock and queue files live. Every memguard that should share a queue must use the same folder |
 
-## Benchmark: is a model that doesn't fit worth it?
 
-Gemma 4 **12B** fully on the card versus Gemma 4 **31B** split between GPU and RAM, run under memguard.
-RTX 3060 12 GB, i5-14600KF, 32 GB DDR4-3200, NVIDIA driver 621.14, llama.cpp b11798. Both models are Unsloth Q4_K_M
-(6.6 GiB and 17.1 GiB), `-c 4096`, one slot. Medians of 10 runs unless noted; run-to-run spread was about 1%.
-
-| Setup | Layers on GPU | Prompt tok/s (400 / 2,000-token prompt) | Generation tok/s |
-|---|---|---|---|
-| 12B, fits on the card | 49 / 49 | 1,040 / 1,179 | **39.9** |
-| 31B, llama.cpp split (`--fit on`) | 31 / 61 | 230 / 306 | **3.3** |
-| 31B, all layers on GPU, driver spills to RAM (`-ngl 99`)* | 61 / 61 | 55 / not run | **1.55** |
-
-\* 3 runs.
 
 What it shows:
 
