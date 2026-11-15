@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memguard-win"
+dynamic = ["version"]
+description = "Run heavy local AI jobs one at a time, and only when RAM + VRAM can hold them (Windows, NVIDIA-aware)."
+readme = "README.md"
+license = { text = "PolyForm-Noncommercial-1.0.0" }
+authors = [{ name = "0xydendrum" }]
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["llm", "gpu", "vram", "oom", "windows", "llama.cpp", "job-queue"]
+classifiers = [
+    "Environment :: Console",
+    "License :: Other/Proprietary License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Monitoring",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.scripts]
+memguard = "memguard.cli:entry"
+memguard-sysmem = "memguard.sysmem:entry"
+
+[tool.setuptools]
+packages = ["memguard"]
+
+[tool.setuptools.dynamic]
+version = { attr = "memguard.__version__" }
