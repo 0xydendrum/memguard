@@ -202,6 +202,8 @@ def job_leftovers(job):
         return None
     names = []
     for pid in info.ids[:info.listed]:
+        if proc_start(pid) is None:  # exited between the listing and now (often the console host): not a leftover
+            continue
         name = f"pid {pid}"
         h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if h:
