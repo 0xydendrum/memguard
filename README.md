@@ -90,19 +90,6 @@ needs 2 + 3 = 5 GiB of RAM.
 
 
 
-What it shows:
-
-- **The 31B generates about 12x slower.** A typical 300-token answer takes about 8 seconds on the 12B and about 90 on
-  the 31B. Whether the bigger model's better answers are worth that depends on the job: fine for an overnight batch,
-  painful for chat.
-- **Don't rely on the driver spill for speed.** Letting the driver move overflow into RAM was half as fast as llama.cpp's
-  own GPU/CPU split. Run oversized models with `--fit on` (or a tuned `-ngl`), and use memguard to make sure the RAM
-  side has room.
-- **memguard's job is safety, not speed.** It predicted the 31B's 7.3 GiB spill before starting. The runs peaked at
-  20.7 to 22.2 GiB of committed memory, and free RAM never fell below 9.4 GiB, above the 6 GiB reserve.
-- With part of the model in RAM, generation speed is capped by **RAM bandwidth**, not RAM size. Faster memory (DDR5,
-  more channels) or more VRAM helps far more than more GB.
-
 ## Limitations
 
 - Windows only (job objects, file locks, and the driver behaviour it budgets for are Windows-specific).
