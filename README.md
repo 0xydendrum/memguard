@@ -1,6 +1,6 @@
 # spillsafe
 
-**Run heavy AI jobs on your own Windows PC without running it out of memory.**
+**Run heavy local AI jobs on Windows without running out of memory. Queues jobs and starts each one only when RAM + VRAM can really hold it, counting the VRAM that NVIDIA quietly spills into RAM. By 0xydendrum.**
 
 spillsafe is a small command-line tool that you put in front of any heavy command: a model eval, a training run, a
 benchmark, a big download. It holds the job back until your PC really has room for it, runs heavy jobs one at a time in
